@@ -198,6 +198,8 @@ Phaser.MSPointer.prototype = {
     */
     onPointerDown: function (event) {
 
+        this.game.input.executeTouchLockCallbacks(false, event);
+
         this.event = event;
 
         if (this.capture)
@@ -271,6 +273,8 @@ Phaser.MSPointer.prototype = {
     * @param {PointerEvent} event - The native DOM event.
     */
     onPointerUp: function (event) {
+
+        this.game.input.executeTouchLockCallbacks(true, event);
 
         this.event = event;
 

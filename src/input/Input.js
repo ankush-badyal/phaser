@@ -155,6 +155,15 @@ Phaser.Input = function (game) {
     this.recordLimit = 100;
 
     /**
+     * An array of callbacks that will be fired every time a native touch start or touch end event (pointerdown or pointerup when using Pointer events) is received from the browser.
+     * This is used internally to handle audio and video unlocking on mobile devices.
+     * To add a callback to this array please use `Input.addTouchLockCallback`.
+     * @property {array} touchLockCallbacks
+     * @protected
+     */
+    this.touchLockCallbacks = [];
+
+    /**
     * @property {Phaser.Pointer} pointer1 - A Pointer object.
     */
     this.pointer1 = null;
@@ -282,25 +291,44 @@ Phaser.Input = function (game) {
     this.resetLocked = false;
 
     /**
-    * A Signal that is dispatched each time a pointer is pressed down.
+    * A Signal that is dispatched each time a {@link Phaser.Pointer pointer} is pressed down.
+    * It is sent two arguments:
+    *
+    * - {Phaser.Pointer} The pointer that caused the event.
+    * - {Event} The original DOM event.
+    *
     * @property {Phaser.Signal} onDown
     */
     this.onDown = null;
 
     /**
-    * A Signal that is dispatched each time a pointer is released.
+    * A Signal that is dispatched each time a {@link Phaser.Pointer pointer} is released.
+    * It is sent two arguments:
+    *
+    * - {Phaser.Pointer} The pointer that caused the event.
+    * - {Event} The original DOM event.
+    *
     * @property {Phaser.Signal} onUp
     */
     this.onUp = null;
 
     /**
-    * A Signal that is dispatched each time a pointer is tapped.
+    * A Signal that is dispatched each time a {@link Phaser.Pointer pointer} is tapped.
+    * It is sent two arguments:
+    *
+    * - {Phaser.Pointer} The pointer that caused the event.
+    * - {boolean} True if this was a double tap.
+    *
     * @property {Phaser.Signal} onTap
     */
     this.onTap = null;
 
     /**
-    * A Signal that is dispatched each time a pointer is held down.
+    * A Signal that is dispatched each time a {@link Phaser.Pointer pointer} is held down.
+    * It is sent one argument:
+    *
+    * - {Phaser.Pointer} The pointer that caused the event.
+    *
     * @property {Phaser.Signal} onHold
     */
     this.onHold = null;
@@ -422,7 +450,12 @@ Phaser.Input.prototype = {
         this.hitContext = this.hitCanvas.getContext('2d');
 
         this.mouse.start();
-        this.touch.start();
+        if (!this.game.device.mspointer)
+        {
+            // Chrome >= 55 fires both PointerEvent and TouchEvent.
+            // Pick only one.
+            this.touch.start();
+        }
         this.mspointer.start();
         this.mousePointer.active = true;
 
@@ -524,6 +557,76 @@ Phaser.Input.prototype = {
 
     },
 
+
+    /**
+     * Adds a callback that is fired when a browser touchstart/pointerdown or touchend/pointerup event is received.
+     *
+     * This is used internally to handle audio and video unlocking on mobile devices.
+     *
+     * If the callback returns 'true' then the callback is automatically deleted once invoked.
+     *
+     * The callback is added to the {@link #touchLockCallbacks} array and should be removed with {@link #removeTouchLockCallback}.
+     *
+     * @method Phaser.Input#addTouchLockCallback
+     * @param {function} callback - The callback that will be called when a touchstart event is received.
+     * @param {object} context - The context in which the callback will be called.
+     * @param {boolean} [onEnd=false] - Will the callback fire on a touchstart/pointerdown (default) or touchend/pointerup event?
+     */
+    addTouchLockCallback: function (callback, context, onEnd) {
+
+        if (onEnd === undefined) { onEnd = false; }
+
+        this.touchLockCallbacks.push({ callback: callback, context: context, onEnd: onEnd });
+
+    },
+
+    /**
+     * Removes the callback at the defined index from the {@link #touchLockCallbacks} array
+     *
+     * @method Phaser.Input#removeTouchLockCallback
+     * @param {function} callback - The callback to be removed.
+     * @param {object} context - The context in which the callback exists.
+     * @return {boolean} True if the callback was deleted, otherwise false.
+     */
+    removeTouchLockCallback: function (callback, context) {
+
+        var i = this.touchLockCallbacks.length;
+
+        while (i--)
+        {
+            if (this.touchLockCallbacks[i].callback === callback && this.touchLockCallbacks[i].context === context)
+            {
+                this.touchLockCallbacks.splice(i, 1);
+                return true;
+            }
+        }
+
+        return false;
+
+    },
+
+    /**
+     * Execute any {@link #touchLockCallbacks} of the given type.
+     *
+     * @method Phaser.Input#executeTouchLockCallbacks
+     * @private
+     * @param {boolean} onEnd - Execute the touchend/pointerup callbacks (true) or the touchstart/pointerdown callbacks (false). Required!
+     * @param {Event} event - The native event from the browser.
+     */
+    executeTouchLockCallbacks: function (onEnd, event) {
+        var i = this.touchLockCallbacks.length;
+
+        while (i--)
+        {
+            var cb = this.touchLockCallbacks[i];
+
+            if (cb.onEnd === onEnd && cb.callback.call(cb.context, this, event))
+            {
+                this.touchLockCallbacks.splice(i, 1);
+            }
+        }
+    },
+
     /**
     * Removes the callback from the Phaser.Input.moveCallbacks array.
     * 
@@ -563,7 +666,7 @@ Phaser.Input.prototype = {
         }
 
         var id = this.pointers.length + 1;
-        var pointer = new Phaser.Pointer(this.game, id, Phaser.PointerMode.TOUCH);
+        var pointer = new Phaser.Pointer(this.game, id, Phaser.PointerMode.CONTACT);
 
         this.pointers.push(pointer);
         this['pointer' + id] = pointer;
@@ -612,6 +715,21 @@ Phaser.Input.prototype = {
     },
 
     /**
+     * Update method while paused.
+     *
+     * @method Phaser.Input#pauseUpdate
+     * @private
+     */
+    pauseUpdate: function () {
+
+        if (this.gamepad && this.gamepad.active)
+        {
+            this.gamepad.update();
+        }
+
+    },
+
+    /**
     * Reset all of the Pointers and Input states.
     *
     * The optional `hard` parameter will reset any events or callbacks that may be bound.
@@ -638,11 +756,6 @@ Phaser.Input.prototype = {
             this.keyboard.reset(hard);
         }
 
-        if (this.gamepad)
-        {
-            this.gamepad.reset();
-        }
-
         for (var i = 0; i < this.pointers.length; i++)
         {
             this.pointers[i].reset();
@@ -650,7 +763,7 @@ Phaser.Input.prototype = {
 
         if (this.game.canvas.style.cursor !== 'none')
         {
-            this.game.canvas.style.cursor = 'inherit';
+            this.game.canvas.style.cursor = '';
         }
 
         if (hard)
@@ -944,6 +1057,21 @@ Phaser.Input.prototype = {
         {
             return (displayObject.hitArea.contains(this._localPoint.x, this._localPoint.y));
         }
+        else if (Phaser.Creature && displayObject instanceof Phaser.Creature) {
+          var width = Math.abs(displayObject.width);
+          var height = Math.abs(displayObject.height);
+          var x1 = displayObject.x - (width * displayObject.anchorX);
+
+          if (this.game.camera.x + pointer.x >= x1 && this.game.camera.x + pointer.x < x1 + width)
+          {
+            var y1 = displayObject.y - (height * displayObject.anchorY);
+
+            if (this.game.camera.y + pointer.y >= y1 && this.game.camera.y + pointer.y < y1 + height)
+            {
+              return true;
+            }
+          }
+        }
         else if (displayObject instanceof Phaser.TileSprite)
         {
             var width = displayObject.width;
@@ -962,8 +1090,8 @@ Phaser.Input.prototype = {
         }
         else if (displayObject instanceof PIXI.Sprite)
         {
-            var width = displayObject.texture.frame.width;
-            var height = displayObject.texture.frame.height;
+            var width = displayObject.texture.frame.width / displayObject.texture.baseTexture.resolution;
+            var height = displayObject.texture.frame.height / displayObject.texture.baseTexture.resolution;
             var x1 = -width * displayObject.anchor.x;
 
             if (this._localPoint.x >= x1 && this._localPoint.x < x1 + width)

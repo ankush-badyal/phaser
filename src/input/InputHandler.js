@@ -437,7 +437,7 @@ Phaser.InputHandler.prototype = {
         {
             if (this._setHandCursor)
             {
-                this.game.canvas.style.cursor = "default";
+                this.game.canvas.style.cursor = "";
                 this._setHandCursor = false;
             }
 
@@ -961,7 +961,7 @@ Phaser.InputHandler.prototype = {
                 this.sprite.events.onInputOver$dispatch(this.sprite, pointer);
             }
 
-            if (this.sprite.parent && this.sprite.parent.type === Phaser.GROUP)
+            if (this.sprite.parent && this.sprite.parent.onChildInputOver)
             {
                 this.sprite.parent.onChildInputOver.dispatch(this.sprite, pointer);
             }
@@ -993,7 +993,7 @@ Phaser.InputHandler.prototype = {
 
         if (this.useHandCursor && data.isDragged === false)
         {
-            this.game.canvas.style.cursor = "default";
+            this.game.canvas.style.cursor = "";
             this._setHandCursor = false;
         }
 
@@ -1001,7 +1001,7 @@ Phaser.InputHandler.prototype = {
         {
             this.sprite.events.onInputOut$dispatch(this.sprite, pointer);
 
-            if (this.sprite && this.sprite.parent && this.sprite.parent.type === Phaser.GROUP)
+            if (this.sprite && this.sprite.parent && this.sprite.parent.onChildInputOut)
             {
                 this.sprite.parent.onChildInputOut.dispatch(this.sprite, pointer);
             }
@@ -1047,7 +1047,7 @@ Phaser.InputHandler.prototype = {
                 this.sprite.events.onInputDown$dispatch(this.sprite, pointer);
 
                 //  The event above might have destroyed this sprite.
-                if (this.sprite && this.sprite.parent && this.sprite.parent.type === Phaser.GROUP)
+                if (this.sprite && this.sprite.parent && this.sprite.parent.onChildInputDown)
                 {
                     this.sprite.parent.onChildInputDown.dispatch(this.sprite, pointer);
                 }
@@ -1148,7 +1148,7 @@ Phaser.InputHandler.prototype = {
                     this.sprite.events.onInputUp$dispatch(this.sprite, pointer, isOver);
                 }
 
-                if (this.sprite && this.sprite.parent && this.sprite.parent.type === Phaser.GROUP)
+                if (this.sprite && this.sprite.parent && this.sprite.parent.onChildInputUp)
                 {
                     this.sprite.parent.onChildInputUp.dispatch(this.sprite, pointer, isOver);
                 }
@@ -1201,19 +1201,29 @@ Phaser.InputHandler.prototype = {
             return false;
         }
 
-        var px = this.globalToLocalX(pointer.x) + this._dragPoint.x + this.dragOffset.x;
-        var py = this.globalToLocalY(pointer.y) + this._dragPoint.y + this.dragOffset.y;
+		var pointerLocalCoord = this.globalToLocal(pointer);
+
+        if (this.sprite.fixedToCamera)
+        {
+            var px = this.game.camera.scale.x * pointerLocalCoord.x + this._dragPoint.x + this.dragOffset.x;
+            var py = this.game.camera.scale.y * pointerLocalCoord.y + this._dragPoint.y + this.dragOffset.y;
+        }
+        else
+        {
+            var px = pointerLocalCoord.x + this._dragPoint.x + this.dragOffset.x;
+            var py = pointerLocalCoord.y + this._dragPoint.y + this.dragOffset.y;
+        }
 
         if (this.sprite.fixedToCamera)
         {
             if (this.allowHorizontalDrag)
             {
-                this.sprite.cameraOffset.x = px;
+                this.sprite.cameraOffset.x = px - this.game.camera.x;
             }
 
             if (this.allowVerticalDrag)
             {
-                this.sprite.cameraOffset.y = py;
+                this.sprite.cameraOffset.y = py - this.game.camera.y;
             }
 
             if (this.boundsRect)
@@ -1471,6 +1481,7 @@ Phaser.InputHandler.prototype = {
 
         var x = this.sprite.x;
         var y = this.sprite.y;
+		var pointerLocalCoord = this.globalToLocal(pointer);
 
         this.isDragged = true;
         this._draggedPointerID = pointer.id;
@@ -1485,9 +1496,10 @@ Phaser.InputHandler.prototype = {
             if (this.dragFromCenter)
             {
                 var bounds = this.sprite.getBounds();
+				var boundsCenterLocalCoord = this.globalToLocal(new Phaser.Point(bounds.centerX, bounds.centerY));
 
-                this.sprite.cameraOffset.x = this.globalToLocalX(pointer.x) + (this.sprite.cameraOffset.x - bounds.centerX);
-                this.sprite.cameraOffset.y = this.globalToLocalY(pointer.y) + (this.sprite.cameraOffset.y - bounds.centerY);
+                this.sprite.cameraOffset.x = pointerLocalCoord.x + (this.sprite.cameraOffset.x - boundsCenterLocalCoord.x);
+                this.sprite.cameraOffset.y = pointerLocalCoord.y + (this.sprite.cameraOffset.y - boundsCenterLocalCoord.y);
             }
 
             this._dragPoint.setTo(this.sprite.cameraOffset.x - pointer.x, this.sprite.cameraOffset.y - pointer.y);
@@ -1497,12 +1509,13 @@ Phaser.InputHandler.prototype = {
             if (this.dragFromCenter)
             {
                 var bounds = this.sprite.getBounds();
+				var boundsCenterLocalCoord = this.globalToLocal(new Phaser.Point(bounds.centerX, bounds.centerY));
 
-                this.sprite.x = this.globalToLocalX(pointer.x) + (this.sprite.x - bounds.centerX);
-                this.sprite.y = this.globalToLocalY(pointer.y) + (this.sprite.y - bounds.centerY);
+                this.sprite.x = pointerLocalCoord.x + (this.sprite.x - boundsCenterLocalCoord.x);
+                this.sprite.y = pointerLocalCoord.y + (this.sprite.y - boundsCenterLocalCoord.y);
             }
 
-            this._dragPoint.setTo(this.sprite.x - this.globalToLocalX(pointer.x), this.sprite.y - this.globalToLocalY(pointer.y));
+            this._dragPoint.setTo(this.sprite.x - pointerLocalCoord.x, this.sprite.y - pointerLocalCoord.y);
         }
 
         this.updateDrag(pointer, true);
@@ -1554,6 +1567,26 @@ Phaser.InputHandler.prototype = {
         }
 
         return y;
+
+    },
+
+    /**
+    * Convert global coordinates to local sprite coordinates
+    *
+    * @method Phaser.InputHandler#globalToLocal
+    * @param {Phaser.Point} globalCoord - The global coordinates to convert.
+    * @return {Phaser.Point} A point containing the local coordinates.
+    */
+    globalToLocal: function (globalCoord) {
+
+		if (this.sprite.parent)
+		{
+			return this.game.input.getLocalPosition(this.sprite.parent, {x: globalCoord.x, y: globalCoord.y});
+		}
+		else
+		{
+			return globalCoord;
+		}
 
     },
 
